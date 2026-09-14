@@ -1,3 +1,387 @@
 #Hours worked counter: 1 as of 9/13 8:30 pm
 #Pasting old code first:
 
+import ast
+import numpy as np
+
+
+# ------------------------------------------------------------
+# Input / output utilities
+# ------------------------------------------------------------
+
+def read_list_from_file(filename):
+    """
+    Read a text file containing a raw Python list.
+
+    Example:
+        [0.0, None, 100.0]
+
+    Returns:
+        Python list
+    """
+    with open(filename, "r") as file:
+        return ast.literal_eval(file.read().strip())
+
+
+def write_list_to_file(filename, values):
+    """
+    Write a Python list to a text file.
+    """
+    with open(filename, "w") as file:
+        file.write(repr(values))
+
+
+# ------------------------------------------------------------
+# FEM functions
+# ------------------------------------------------------------
+
+def element_stiffness(k):
+    """
+    Return the 2x2 local stiffness matrix for a two-node spring.
+
+        [ k  -k ]
+    Ke = [      ]
+        [-k   k ]
+    """
+    return np.array([
+        [k, -k],
+        [-k, k]
+    ], dtype=float)
+
+
+def assemble_global_stiffness(num_nodes, connectivity, k_values):
+    """
+    Assemble the global stiffness matrix.
+
+    connectivity uses zero-based Python node numbering.
+    """
+    K = np.zeros((num_nodes, num_nodes), dtype=float)
+
+    for e in range(len(connectivity)):
+        nodes = connectivity[e]
+        ke = element_stiffness(k_values[e])
+
+        # Explicit local-to-global assembly
+        for local_row in range(2):
+            global_row = nodes[local_row]
+
+            for local_col in range(2):
+                global_col = nodes[local_col]
+
+                K[global_row, global_col] += ke[local_row, local_col]
+
+    return K
+
+
+def build_force_vector(loads):
+    """
+    Convert the list of nodal loads into a NumPy force vector.
+    """
+    return np.array(loads, dtype=float)
+
+
+def solve_system(K, F, prescribed_displacements):
+    """
+    Apply displacement boundary conditions and solve for nodal
+    displacements.
+
+    Returns:
+        u          - complete nodal displacement vector
+        reactions  - reaction force at every node
+        free_dofs  - indices of unconstrained DOFs
+    """
+    num_nodes = len(F)
+
+    prescribed_dofs = []
+    free_dofs = []
+
+    u = np.zeros(num_nodes, dtype=float)
+
+    for i, value in enumerate(prescribed_displacements):
+        if value is None:
+            free_dofs.append(i)
+        else:
+            prescribed_dofs.append(i)
+            u[i] = float(value)
+
+    # Check that enough boundary conditions have been specified.
+    if len(free_dofs) == 0:
+        raise ValueError("There are no free degrees of freedom.")
+
+    K_ff = K[np.ix_(free_dofs, free_dofs)]
+    K_fe = K[np.ix_(free_dofs, prescribed_dofs)]
+
+    F_f = F[free_dofs]
+    u_e = u[prescribed_dofs]
+
+    # Solve:
+    # K_ff u_f = F_f - K_fe u_e
+    rhs = F_f - K_fe @ u_e
+
+    try:
+        u_f = np.linalg.solve(K_ff, rhs)
+    except np.linalg.LinAlgError:
+        raise ValueError(
+            "The free stiffness matrix is singular. "
+            "The structure may have an unconstrained rigid-body motion "
+            "or insufficient displacement boundary conditions."
+        )
+
+    u[free_dofs] = u_f
+
+    # Reaction vector:
+    # R = K u - F
+    reactions = K @ u - F
+
+    return u, reactions, free_dofs
+
+
+def recover_element_forces(u, connectivity, k_values):
+    """
+    Calculate the internal force in every spring.
+
+    For an element connecting nodes i and j:
+
+        delta_u = u[j] - u[i]
+        F_internal = k * delta_u
+
+    Positive value = extension/tension.
+    Negative value = compression.
+    """
+    internal_forces = []
+
+    for e in range(len(connectivity)):
+        i, j = connectivity[e]
+
+        extension = u[j] - u[i]
+        force = k_values[e] * extension
+
+        internal_forces.append(force)
+
+    return np.array(internal_forces, dtype=float)
+
+
+# ------------------------------------------------------------
+# Verification
+# ------------------------------------------------------------
+
+def check_solution(K, F, u, reactions, free_dofs):
+    """
+    Perform numerical and mechanical checks.
+    """
+    tolerance = 1e-10
+
+    # Check 1: global stiffness matrix is symmetric
+    symmetry_check = np.allclose(K, K.T, atol=tolerance)
+
+    # Check 2: residual at free DOFs is approximately zero
+    residual = K @ u - F
+    free_residual_check = np.allclose(
+        residual[free_dofs],
+        0.0,
+        atol=tolerance
+    )
+
+    # Check 3: global force equilibrium
+    equilibrium_check = np.isclose(
+        np.sum(F) + np.sum(reactions),
+        0.0,
+        atol=tolerance
+    )
+
+    print("\nVerification checks:")
+    print(f"  Global stiffness matrix symmetric: {symmetry_check}")
+    print(f"  Free-DOF residual approximately zero: {free_residual_check}")
+    print(f"  Global force equilibrium satisfied: {equilibrium_check}")
+
+    if not symmetry_check:
+        print("WARNING: Global stiffness matrix is not symmetric.")
+
+    if not free_residual_check:
+        print("WARNING: Residual is not zero at all free DOFs.")
+
+    if not equilibrium_check:
+        print("WARNING: Global force equilibrium is not satisfied.")
+
+    return symmetry_check and free_residual_check and equilibrium_check
+
+
+# ------------------------------------------------------------
+# Main program
+# ------------------------------------------------------------
+
+def main():
+    """
+    Main FEM workflow:
+
+    1. Read input
+    2. Convert connectivity to zero-based indexing
+    3. Assemble global stiffness matrix
+    4. Build global force vector
+    5. Apply BCs and solve
+    6. Calculate reactions
+    7. Calculate element forces
+    8. Verify solution
+    9. Write output files
+    """
+
+    # Read input files
+                                              # Adding nodal coordinates first
+    node_inputs = read_list_from_file(
+        "nodal coordinates.txt"
+    )
+    
+    connectivity_input = read_list_from_file(
+        "connectivity array.txt"
+    )
+
+    k_values_input = read_list_from_file(
+        "element stiffnesses.txt"
+    )
+
+    loads_input = read_list_from_file(
+        "external nodal forces.txt"
+    )
+
+    prescribed_displacements = read_list_from_file(
+        "displacement BCs.txt"
+    )
+    
+    
+    # Convert input data to NumPy arrays
+
+    connectivity_course = np.array(
+        connectivity_input,
+        dtype=int
+    )
+                                                      #Dont need to remove one anymore so added hashtag below
+    #connectivity = connectivity_course - 1
+
+    k_values = np.array(
+        k_values_input,
+        dtype=float
+    )
+                                                        #Adding coordinate inputs
+    coords = np.array(
+        node_inputs,
+        dtype=float
+    )
+    
+    F = build_force_vector(loads_input)
+
+    num_nodes = len(coords)                          #should instead take length of nodal inputs aka coords
+    num_elements = len(connectivity)
+
+    # --------------------------------------------------------
+    # Input validation
+    # --------------------------------------------------------
+
+    if connectivity.shape != (num_elements, 2):
+        raise ValueError(
+            "Connectivity array must contain two nodes per element."
+        )
+
+    if len(k_values) != num_elements:
+        raise ValueError(
+            "Number of element stiffnesses must equal "
+            "number of elements."
+        )
+
+    if len(prescribed_displacements) != num_nodes:
+        raise ValueError(
+            "Number of displacement BCs must equal number of nodes."
+        )
+
+    if np.any(connectivity < 0) or np.any(connectivity >= num_nodes):
+        raise ValueError(
+            "Connectivity contains an invalid node number."
+        )
+
+    # The assignment input uses zero-based node numbering.
+    # Therefore, no conversion is necessary here.
+
+    # --------------------------------------------------------
+    # Assemble global stiffness matrix
+    # --------------------------------------------------------
+
+    K = assemble_global_stiffness(
+        num_nodes,
+        connectivity,
+        k_values
+    )
+
+    # --------------------------------------------------------
+    # Solve system
+    # --------------------------------------------------------
+
+    u, reactions, free_dofs = solve_system(
+        K,
+        F,
+        prescribed_displacements
+    )
+
+    # --------------------------------------------------------
+    # Recover element internal forces
+    # --------------------------------------------------------
+
+    internal_forces = recover_element_forces(
+        u,
+        connectivity,
+        k_values
+    )
+
+    # --------------------------------------------------------
+    # Verification
+    # --------------------------------------------------------
+
+    check_solution(
+        K,
+        F,
+        u,
+        reactions,
+        free_dofs
+    )
+
+    # --------------------------------------------------------
+    # Write required output files
+    # --------------------------------------------------------
+
+    write_list_to_file(
+        "nodal displacements.txt",
+        u.tolist()
+    )
+
+    write_list_to_file(
+        "reaction forces.txt",
+        reactions.tolist()
+    )
+
+    write_list_to_file(
+        "internal forces.txt",
+        internal_forces.tolist()
+    )
+
+    # --------------------------------------------------------
+    # Display results
+    # --------------------------------------------------------
+
+    print("\nGlobal stiffness matrix K:")
+    print(K)
+
+    print("\nNodal displacements:")
+    print(u.tolist())
+
+    print("\nReaction forces:")
+    print(reactions.tolist())
+
+    print("\nInternal element forces:")
+    print(internal_forces.tolist())
+
+    print("\nOutput files created:")
+    print("  nodal displacements.txt")
+    print("  reaction forces.txt")
+    print("  internal forces.txt")
+
+
+if __name__ == "__main__":
+    main()
