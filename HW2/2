@@ -34,7 +34,12 @@ def write_list_to_file(filename, values):
 # ------------------------------------------------------------
 # FEM functions
 # ------------------------------------------------------------
-                                                                        #NEW function
+                                                                        #NEW function from guide
+def element_dofs(nodes):
+    i, j = nodes
+    return np.array([2*i, 2*i + 1, 2*j, 2*j + 1], dtype=int)
+    
+                                                                        #NEW function from guide
 def element_geometry(x1, x2):
     """
     Get element lengths and angles
@@ -50,7 +55,7 @@ def element_geometry(x1, x2):
     return L, c, s
 
 def element_stiffness(x1, x2, k):
-    # Return the 4 x 4 truss stiffness matrix in global coordinates.            #Updated for new K
+    # Return the 4 x 4 truss stiffness matrix in global coordinates.            #Updated for new K from guide
     # Construct ke from k, c, and s.
     # Keep the expression close to the equation above.
 
@@ -63,38 +68,43 @@ def element_stiffness(x1, x2, k):
     ], dtype=float)
     
     return ke
-
-def assemble_global_stiffness(num_nodes, connectivity, k_values):
+                                                                                #UPDATED assembly from guide
+def assemble_global_stiffness(num_nodes, coords, connectivity, k_values):
     """
     Assemble the global stiffness matrix.
 
     connectivity uses zero-based Python node numbering.
     """
-    K = np.zeros((num_nodes, num_nodes), dtype=float)
+    ndof = 2 * num_nodes
+    K = np.zeros((ndof, ndof))
 
-    for e in range(len(connectivity)):
+    for e in range(num_elements):
         nodes = connectivity[e]
-        ke = element_stiffness(k_values[e])
+        gdofs = element_dofs(nodes)
+        
+        x1 = coords[nodes[0]]
+        x2 = coords[nodes[1]]
+        ke = element_stiffness(x1, x2, element_stiffnesses[e])
 
-        # Explicit local-to-global assembly
-        for local_row in range(2):
-            global_row = nodes[local_row]
-
-            for local_col in range(2):
-                global_col = nodes[local_col]
-
-                K[global_row, global_col] += ke[local_row, local_col]
-
+        for a in range(4):
+            A = gdofs[a]
+            for b in range(4):
+                B = gdofs[b]
+                K[A, B] += ke[a, b]
     return K
 
-
+                                                                            #UPdated from guide
 def build_force_vector(loads):
     """
     Convert the list of nodal loads into a NumPy force vector.
     """
-    return np.array(loads, dtype=float)
+    
+    external_nodal_forces = np.array(loads, dtype=float)
+    F = external_nodal_forces.reshape(-1)
 
-
+    return F
+    
+                                                                            #Updating from guide
 def solve_system(K, F, prescribed_displacements):
     """
     Apply displacement boundary conditions and solve for nodal
@@ -105,19 +115,21 @@ def solve_system(K, F, prescribed_displacements):
         reactions  - reaction force at every node
         free_dofs  - indices of unconstrained DOFs
     """
-    num_nodes = len(F)
+    num_dofs = len(F)
 
     prescribed_dofs = []
     free_dofs = []
 
-    u = np.zeros(num_nodes, dtype=float)
+    u = np.zeros(num_dofs, dtype=float)
 
-    for i, value in enumerate(prescribed_displacements):
-        if value is None:
-            free_dofs.append(i)
-        else:
-            prescribed_dofs.append(i)
-            u[i] = float(value)
+    for node, pair in enumerate(prescribed_displacements):
+        for direction, value in enumerate(pair):
+            gdof = 2*node + direction
+            if value is None:
+                free_dofs.append(gdof)
+            else:
+                prescribed_dofs.append(gdof)
+                u[gdof] = float(value)
 
     # Check that enough boundary conditions have been specified.
     if len(free_dofs) == 0:
