@@ -34,20 +34,35 @@ def write_list_to_file(filename, values):
 # ------------------------------------------------------------
 # FEM functions
 # ------------------------------------------------------------
-
-def element_stiffness(k):
+                                                                        #NEW function
+def element_geometry(x1, x2):
     """
-    Return the 2x2 local stiffness matrix for a two-node spring.
-
-        [ k  -k ]
-    Ke = [      ]
-        [-k   k ]
+    Get element lengths and angles
     """
-    return np.array([
-        [k, -k],
-        [-k, k]
+    delta = x2 - x1
+    L = np.linalg.norm(delta)
+
+    if L <= 0.0:
+        raise ValueError"Truss element has zero length")
+        
+    c = delta[0] / L
+    s = delta[1] / L
+    return L, c, s
+
+def element_stiffness(x1, x2, k):
+    # Return the 4 x 4 truss stiffness matrix in global coordinates.            #Updated for new K
+    # Construct ke from k, c, and s.
+    # Keep the expression close to the equation above.
+
+    L, c, s = element_geometry(x1, x2)
+    ke = k * np.array([
+        [c*c, c*s, -c*c, -c*s],
+        [c*s, s*s, -c*s, -s*s],
+        [-c*c, -c*s, c*c, c*s],
+        [-c*s, -s*s, c*s, s*s]
     ], dtype=float)
-
+    
+    return ke
 
 def assemble_global_stiffness(num_nodes, connectivity, k_values):
     """
@@ -138,7 +153,7 @@ def solve_system(K, F, prescribed_displacements):
 
 def recover_element_forces(u, connectivity, k_values):
     """
-    Calculate the internal force in every spring.
+    Calculate the internal force in every element.
 
     For an element connecting nodes i and j:
 
@@ -176,18 +191,11 @@ def check_solution(K, F, u, reactions, free_dofs):
 
     # Check 2: residual at free DOFs is approximately zero
     residual = K @ u - F
-    free_residual_check = np.allclose(
-        residual[free_dofs],
-        0.0,
-        atol=tolerance
-    )
+    
+    free_residual_check = np.allclose(residual[free_dofs], 0.0, atol=tolerance)
 
     # Check 3: global force equilibrium
-    equilibrium_check = np.isclose(
-        np.sum(F) + np.sum(reactions),
-        0.0,
-        atol=tolerance
-    )
+    equilibrium_check = np.isclose(np.sum(F) + np.sum(reactions), 0.0, atol=tolerance)
 
     print("\nVerification checks:")
     print(f"  Global stiffness matrix symmetric: {symmetry_check}")
@@ -226,46 +234,27 @@ def main():
     """
 
     # Read input files
-                                              # Adding nodal coordinates first
-    node_inputs = read_list_from_file(
-        "nodal coordinates.txt"
-    )
+                                                                      # Adding nodal coordinates first
+    node_inputs = read_list_from_file("nodal coordinates.txt")
     
-    connectivity_input = read_list_from_file(
-        "connectivity array.txt"
-    )
+    connectivity_input = read_list_from_file("connectivity array.txt")
 
-    k_values_input = read_list_from_file(
-        "element stiffnesses.txt"
-    )
+    k_values_input = read_list_from_file("element stiffnesses.txt")
 
-    loads_input = read_list_from_file(
-        "external nodal forces.txt"
-    )
+    loads_input = read_list_from_file("external nodal forces.txt")
 
-    prescribed_displacements = read_list_from_file(
-        "displacement BCs.txt"
-    )
+    prescribed_displacements = read_list_from_file("displacement BCs.txt")
     
     
     # Convert input data to NumPy arrays
 
-    connectivity_course = np.array(
-        connectivity_input,
-        dtype=int
-    )
-                                                      #Dont need to remove one anymore so added hashtag below
-    #connectivity = connectivity_course - 1
+    connectivity_course = np.array(connectivity_input, dtype=int)
+                                                                      #Dont need to remove one anymore
+    connectivity = connectivity_course
 
-    k_values = np.array(
-        k_values_input,
-        dtype=float
-    )
-                                                        #Adding coordinate inputs
-    coords = np.array(
-        node_inputs,
-        dtype=float
-    )
+    k_values = np.array(k_values_input, dtype=float)
+                                                                    #Adding coordinate inputs
+    coords = np.array(node_inputs, dtype=float)
     
     F = build_force_vector(loads_input)
 
@@ -277,25 +266,16 @@ def main():
     # --------------------------------------------------------
 
     if connectivity.shape != (num_elements, 2):
-        raise ValueError(
-            "Connectivity array must contain two nodes per element."
-        )
+        raise ValueError("Connectivity array must contain two nodes per element.")
 
     if len(k_values) != num_elements:
-        raise ValueError(
-            "Number of element stiffnesses must equal "
-            "number of elements."
-        )
+        raise ValueError("Number of element stiffnesses must equal number of elements.")
 
     if len(prescribed_displacements) != num_nodes:
-        raise ValueError(
-            "Number of displacement BCs must equal number of nodes."
-        )
+        raise ValueError("Number of displacement BCs must equal number of nodes.")
 
     if np.any(connectivity < 0) or np.any(connectivity >= num_nodes):
-        raise ValueError(
-            "Connectivity contains an invalid node number."
-        )
+        raise ValueError("Connectivity contains an invalid node number.")
 
     # The assignment input uses zero-based node numbering.
     # Therefore, no conversion is necessary here.
@@ -304,62 +284,35 @@ def main():
     # Assemble global stiffness matrix
     # --------------------------------------------------------
 
-    K = assemble_global_stiffness(
-        num_nodes,
-        connectivity,
-        k_values
-    )
+    K = assemble_global_stiffness(num_nodes, connectivity, k_values)
 
     # --------------------------------------------------------
     # Solve system
     # --------------------------------------------------------
 
-    u, reactions, free_dofs = solve_system(
-        K,
-        F,
-        prescribed_displacements
-    )
+    u, reactions, free_dofs = solve_system(K, F, prescribed_displacements)
 
     # --------------------------------------------------------
     # Recover element internal forces
     # --------------------------------------------------------
 
-    internal_forces = recover_element_forces(
-        u,
-        connectivity,
-        k_values
-    )
+    internal_forces = recover_element_forces(u, connectivity, k_values)
 
     # --------------------------------------------------------
     # Verification
     # --------------------------------------------------------
 
-    check_solution(
-        K,
-        F,
-        u,
-        reactions,
-        free_dofs
-    )
+    check_solution(K, F, u, reactions, free_dofs)
 
     # --------------------------------------------------------
     # Write required output files
     # --------------------------------------------------------
 
-    write_list_to_file(
-        "nodal displacements.txt",
-        u.tolist()
-    )
+    write_list_to_file("nodal displacements.txt", u.tolist())
 
-    write_list_to_file(
-        "reaction forces.txt",
-        reactions.tolist()
-    )
+    write_list_to_file("reaction forces.txt", reactions.tolist())
 
-    write_list_to_file(
-        "internal forces.txt",
-        internal_forces.tolist()
-    )
+    write_list_to_file("internal forces.txt", internal_forces.tolist())
 
     # --------------------------------------------------------
     # Display results
