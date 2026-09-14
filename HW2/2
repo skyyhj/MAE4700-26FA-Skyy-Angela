@@ -156,14 +156,18 @@ def solve_system(K, F, prescribed_displacements):
 
     u[free_dofs] = u_f
 
-    # Reaction vector:
+    # Reaction vector:                                    #UPDATED from guide
     # R = K u - F
-    reactions = K @ u - F
+    full_residual = K @ d - F
+    
+    reactions = np.zeros_like(F)
+    reactions[prescribe_dofs] = full_residual[prescribed_dofs]
+    reaction_pairs = reactions.reshape((num_nodes, 2))
 
     return u, reactions, free_dofs
 
 
-def recover_element_forces(u, connectivity, k_values):
+def recover_element_forces(coords, u, connectivity, k_values):
     """
     Calculate the internal force in every element.
 
@@ -178,10 +182,31 @@ def recover_element_forces(u, connectivity, k_values):
     internal_forces = []
 
     for e in range(len(connectivity)):
-        i, j = connectivity[e]
+        nodes = connectivity[e]
+        gdofs = element_dofs(nodes)
+        element_u = u[gdofs]
 
-        extension = u[j] - u[i]
-        force = k_values[e] * extension
+        i = nodes[0]
+        j = nodes[1]
+
+        x1 = coords[i]
+        x2 = coords[j]
+
+        L, c, s = element_geometry(x1, x2)
+
+        uix = element_u[0]
+        uiy = element_u[1]
+        ujx = element_u[2]
+        ujy = element_u[3]
+
+        axial_extension = (
+            -c*uix
+            -s*uiy
+            +c*ujx
+            +s*ujy
+        )
+
+        force = (k_values[e]*axial_extension)
 
         internal_forces.append(force)
 
@@ -277,6 +302,9 @@ def main():
     # Input validation
     # --------------------------------------------------------
 
+    if coords.shape != (num_nodes, 2):
+        raise ValueError("Nodal coordinates must contain 2 coordinates per node.")
+
     if connectivity.shape != (num_elements, 2):
         raise ValueError("Connectivity array must contain two nodes per element.")
 
@@ -289,6 +317,10 @@ def main():
     if np.any(connectivity < 0) or np.any(connectivity >= num_nodes):
         raise ValueError("Connectivity contains an invalid node number.")
 
+    loads_array = np.array(loads_input, dtype=float)
+    if loads_array.shape != (num_nodes, 2):
+        raise ValueError("External node forces must contain an Fx and Fy per node.")
+
     # The assignment input uses zero-based node numbering.
     # Therefore, no conversion is necessary here.
 
@@ -296,7 +328,7 @@ def main():
     # Assemble global stiffness matrix
     # --------------------------------------------------------
 
-    K = assemble_global_stiffness(num_nodes, connectivity, k_values)
+    K = assemble_global_stiffness(num_nodes, coords, connectivity, k_values)
 
     # --------------------------------------------------------
     # Solve system
@@ -308,7 +340,7 @@ def main():
     # Recover element internal forces
     # --------------------------------------------------------
 
-    internal_forces = recover_element_forces(u, connectivity, k_values)
+    internal_forces = recover_element_forces(coords, u, connectivity, k_values)
 
     # --------------------------------------------------------
     # Verification
@@ -320,9 +352,11 @@ def main():
     # Write required output files
     # --------------------------------------------------------
 
-    write_list_to_file("nodal displacements.txt", u.tolist())
+    nodal_displacements = u.reshape((num_nodes, 2))
+    write_list_to_file("nodal displacements.txt", nodal_displacements.tolist())
 
-    write_list_to_file("reaction forces.txt", reactions.tolist())
+    reaction_pairs = reactions.reshape((num_nodes, 2))
+    write_list_to_file("reaction forces.txt", reaction_pairs.tolist())
 
     write_list_to_file("internal forces.txt", internal_forces.tolist())
 
@@ -334,10 +368,10 @@ def main():
     print(K)
 
     print("\nNodal displacements:")
-    print(u.tolist())
+    print(nodal_displacements.tolist())
 
     print("\nReaction forces:")
-    print(reactions.tolist())
+    print(reaction_pairs.tolist())
 
     print("\nInternal element forces:")
     print(internal_forces.tolist())
