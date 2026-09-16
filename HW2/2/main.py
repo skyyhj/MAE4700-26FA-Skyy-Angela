@@ -48,7 +48,7 @@ def element_geometry(x1, x2):
     L = np.linalg.norm(delta)
 
     if L <= 0.0:
-        raise ValueError"Truss element has zero length")
+        raise ValueError("Truss element has zero length")
         
     c = delta[0] / L
     s = delta[1] / L
@@ -76,15 +76,15 @@ def assemble_global_stiffness(num_nodes, coords, connectivity, k_values):
     connectivity uses zero-based Python node numbering.
     """
     ndof = 2 * num_nodes
-    K = np.zeros((ndof, ndof))
+    K = np.zeros((ndof, ndof), dtype=float)
 
-    for e in range(num_elements):
+    for e in range(len(connectivity)):
         nodes = connectivity[e]
         gdofs = element_dofs(nodes)
         
         x1 = coords[nodes[0]]
         x2 = coords[nodes[1]]
-        ke = element_stiffness(x1, x2, element_stiffnesses[e])
+        ke = element_stiffness(x1, x2, k_values[e])
 
         for a in range(4):
             A = gdofs[a]
@@ -158,11 +158,10 @@ def solve_system(K, F, prescribed_displacements):
 
     # Reaction vector:                                    #UPDATED from guide
     # R = K u - F
-    full_residual = K @ d - F
+    full_residual = K @ u - F
     
     reactions = np.zeros_like(F)
-    reactions[prescribe_dofs] = full_residual[prescribed_dofs]
-    reaction_pairs = reactions.reshape((num_nodes, 2))
+    reactions[prescribed_dofs] = full_residual[prescribed_dofs]
 
     return u, reactions, free_dofs
 
@@ -260,7 +259,7 @@ def main():
     Main FEM workflow:
 
     1. Read input
-    2. Convert connectivity to zero-based indexing
+    2. Convert input data to Numpy arrays
     3. Assemble global stiffness matrix
     4. Build global force vector
     5. Apply BCs and solve
