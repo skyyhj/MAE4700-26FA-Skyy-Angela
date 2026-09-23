@@ -332,30 +332,32 @@ def main():
     if thermal:
         # Explicit material properties given for Question 4(c)
         E_steel = 200e9  # Pa (200 GPa)
-        A_steel = 1e-4   # m^2 (1 cm^2)
-        element_idx = 0  # Change to the specific non-zero bar you want to report
+        A_steel = 1e-4   # m^2 (1 cm^2)[cite: 2]
+        
+        print("\n--- Element Strain & Stress Report ---")
+        for i in range(len(connectivity)):
+            nodes = connectivity[i]
+            gdofs = element_dofs(nodes, ndim)
+            element_u = u[gdofs]
 
-        nodes = connectivity[element_idx]
-        gdofs = element_dofs(nodes, ndim)
-        element_u = u[gdofs]
+            x1 = coords[nodes[0]]
+            x2 = coords[nodes[1]]
+            L, n, B = element_operator(x1, x2)
 
-        x1 = coords[nodes[0]]
-        x2 = coords[nodes[1]]
-        L, n, B = element_operator(x1, x2)
+            # Calculate strains and stress using guide formulas
+            eps_tot = (B @ element_u) / L
+            eps_th = alpha[i] * dT[i]
+            eps_mech = eps_tot - eps_th
+            thermal_extension = L * alpha[i] * dT[i]
+            force = k_values[i] * ((B @ element_u) - thermal_extension)
+            stress = force / A_steel
 
-        # Calculate strains and stress
-        eps_tot = (B @ element_u) / L
-        eps_th = alpha[element_idx] * dT[element_idx]
-        eps_mech = eps_tot - eps_th
-        thermal_extension = L * alpha[element_idx] * dT[element_idx]
-        force = k_values[element_idx] * ((B @ element_u) - thermal_extension)
-        stress = force / A_steel
-
-        print(f"\n--- Strain & Stress Report (Element {element_idx}) ---")
-        print(f"  Total Strain (eps_tot):       {eps_tot:.6e}")
-        print(f"  Thermal Strain (eps_th):      {eps_th:.6e}")
-        print(f"  Mechanical Strain (eps_mech): {eps_mech:.6e}")
-        print(f"  Axial Stress (sigma):         {stress:.4f} Pa ({stress / 1e6:.2f} MPa)")
+            print(f"Element {i}:")
+            print(f"  Total Strain (eps_tot):       {eps_tot:.6e}")
+            print(f"  Thermal Strain (eps_th):      {eps_th:.6e}")
+            print(f"  Mechanical Strain (eps_mech): {eps_mech:.6e}")
+            print(f"  Axial Stress (sigma):         {stress:.4f} Pa ({stress / 1e6:.2f} MPa)")
+            
     # --------------------------------------------------------
     # Write required output files
     # --------------------------------------------------------
