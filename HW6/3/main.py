@@ -94,6 +94,9 @@ def evaluate_function(expr, x):
         return value
     return float(value)
 
+    if not np.isfinite(value):
+        raise ValueError(f"Function {expr!r} is not finite at x={x}.")
+
 
 # ------------------------------------------------------------
 # Computational mesh
@@ -205,11 +208,8 @@ def add_point_sources(x_all, full_connectivity, nnpe, point_sources, F):
     x_max = float(np.max(x_all))
 
     for source in point_sources:
-        if len(source) != 2:
-            raise ValueError("Each point source must be [location, value].")
-
         xp, magnitude = map(float, source)
-
+        
         if not x_min <= xp <= x_max:
             raise ValueError("A point source lies outside the domain.")
 
@@ -223,7 +223,7 @@ def add_point_sources(x_all, full_connectivity, nnpe, point_sources, F):
             if xL <= xp <= xR:
                 owner = (e, gdofs, xe)
                 break
-
+        
         if owner is None:
             raise ValueError(f"Could not locate point source at x={xp}.")
 
