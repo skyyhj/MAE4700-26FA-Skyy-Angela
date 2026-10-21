@@ -90,12 +90,9 @@ def evaluate_function(expr, x):
     """Evaluate a coefficient/source expression using x and NumPy."""
     value = eval(expr, {"np": np, "x": x, "__builtins__": {}})
 
-    value = float(value)
-
-    if not np.isfinite(value):
-        raise ValueError(f"Function {expr!r} is not finite at x={x}.")
-
-    return value
+    if isinstance(value, np.ndarray):
+        return value
+    return float(value)
 
 
 # ------------------------------------------------------------
@@ -230,14 +227,13 @@ def add_point_sources(x_all, full_connectivity, nnpe, point_sources, F):
         if owner is None:
             raise ValueError(f"Could not locate point source at x={xp}.")
 
-        _, gdofs, xe = owner
-        xL, xR = xe[0], xe[-1]
-
-        xi = 2.0 * (xp - xL) / (xR - xL) - 1.0
-        N = shape_functions(xi, nnpe)
-
-        for a, A in enumerate(gdofs):
-            F[A] += N[a] * magnitude
+        if owner is not None:
+            _, gdofs, xe = owner
+            xL, xR = xe[0], xe[-1]
+            xi = 2.0 * (xp - xL) / (xR - xL) - 1.0
+            N = shape_functions(xi, nnpe)
+            for a, A in enumerate(gdofs):
+                F[A] += N[a] * magnitude
 
 
 # ------------------------------------------------------------
