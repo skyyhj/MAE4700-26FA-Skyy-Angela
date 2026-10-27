@@ -135,7 +135,7 @@ def validate_inputs(coords, connectivity, element_EI,
 
 
 # ------------------------------------------------------------
-# Partitioned solver (reused from previous homework)
+# Partitioned solver (from previous homework)
 # ------------------------------------------------------------
 def solve_system(K, F, essential_dofs, prescribed_values):
     """Solve K_ff d_f = F_f - K_fe d_e and return R = Kd - F."""
@@ -187,7 +187,7 @@ def postprocess_element(x1, x2, EI, de):
 
 
 # ------------------------------------------------------------
-# Main program
+# Main 
 # ------------------------------------------------------------
 def main():
     # Read the six required input files.
