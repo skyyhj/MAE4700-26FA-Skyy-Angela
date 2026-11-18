@@ -220,10 +220,10 @@ def post_process(coords, conn, phi, elem_type):
 
 
 def main():
-    coords_list = read_list_file("nodal coordinates.txt")
-    conn = read_list_file("connectivity array.txt")
-    essential_bcs = read_list_file("essential BCs.txt")
-    G_alpha_list = read_list_file("problem parameters.txt")
+    coords_list = read_list_file("nodal_coordinates.txt")
+    conn = read_list_file("connectivity_array.txt")
+    essential_bcs = read_list_file("essential_BCs.txt")
+    G_alpha_list = read_list_file("problem_parameters.txt")
 
     coords = np.array(coords_list, dtype=float)
     phi, elem_type = solve_torsion(coords, conn, essential_bcs, G_alpha_list)
