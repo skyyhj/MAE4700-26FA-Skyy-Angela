@@ -1,3 +1,4 @@
+
 import ast
 import matplotlib.pyplot as plt
 import matplotlib.tri as mtri
@@ -10,62 +11,80 @@ def load_list(filename):
 
 
 def plot_torsion_results():
-    coords = np.array(load_list("nodal coordinates.txt"), dtype=float)
-    conn = load_list("connectivity array.txt")
+    coords = np.array(load_list("nodal_coordinates.txt"), dtype=float)
+    conn = load_list("connectivity_array.txt")
     phi = np.array(load_list("nodal_phi.txt"), dtype=float)
     stresses = np.array(load_list("element_stresses.txt"), dtype=float)
 
-    # Convert Q4 elements into two triangles for matplotlib triangulation plotting
+    if len(conn) != len(stresses):
+        raise ValueError("Number of elements and stress values do not match.")
+
+    # Convert Q4 elements into triangles for plotting only
     tris = []
     tri_stresses = []
     centroids = []
+
     for elem, s in zip(conn, stresses):
-        centroids.append(coords[elem].mean(axis=0))
+        elem_coords = coords[elem]
+        centroids.append(elem_coords.mean(axis=0))
+
         if len(elem) == 3:
             tris.append(elem)
-            tri_stresses.append(s)
+            tri_stresses.append(s[2])
+
         elif len(elem) == 4:
             tris.append([elem[0], elem[1], elem[2]])
             tris.append([elem[0], elem[2], elem[3]])
-            tri_stresses.append(s)
-            tri_stresses.append(s)
+            tri_stresses.extend([s[2], s[2]])
+
+        else:
+            raise ValueError("Unsupported element type.")
 
     centroids = np.array(centroids)
     tri_stresses = np.array(tri_stresses)
-    triang = mtri.Triangulation(coords[:, 0], coords[:, 1], np.array(tris))
 
-    fig, axes = plt.subplots(1, 3, figsize=(16, 4.8))
-
-    # 1. Contour plot of stress function phi
-    c1 = axes[0].tricontourf(triang, phi, levels=20, cmap="viridis")
-    axes[0].triplot(triang, color="k", lw=0.3, alpha=0.4)
-    fig.colorbar(c1, ax=axes[0], label=r"$\phi$ (N/m)")
-    axes[0].set_title(r"Stress Function $\phi$")
-    axes[0].set_aspect("equal")
-
-    # 2. Element-wise von Mises effective stress contour
-    c2 = axes[1].tripcolor(
-        triang, facecolors=tri_stresses[:, 2], shading="flat", cmap="plasma"
+    triang = mtri.Triangulation(
+        coords[:, 0],
+        coords[:, 1],
+        np.array(tris)
     )
-    fig.colorbar(c2, ax=axes[1], label=r"$\sigma_{\mathrm{vm}}$ (Pa)")
-    axes[1].set_title(r"von Mises Effective Stress $\sigma_{\mathrm{vm}}$")
-    axes[1].set_aspect("equal")
 
-    # 3. Vector plot of shear stress (tau_xz, tau_yz) at element centroids
+    fig, axes = plt.subplots(1, 3, figsize=(16, 5))
+
+    # 1. Stress function contour
+    c1 = axes[0].tricontourf(
+        triang, phi, levels=20, cmap="viridis"
+    )
+    axes[0].triplot(triang, color="black", lw=0.3)
+    fig.colorbar(c1, ax=axes[0], label=r"$\phi$ (Pa m$^2$)")
+    axes[0].set_title(r"Stress Function $\phi$")
+
+    # 2. Von Mises stress contour
+    c2 = axes[1].tripcolor(
+        triang,
+        facecolors=tri_stresses,
+        shading="flat",
+        cmap="plasma"
+    )
+    axes[1].triplot(triang, color="black", lw=0.3)
+    fig.colorbar(c2, ax=axes[1], label=r"$\sigma_{vm}$ (Pa)")
+    axes[1].set_title(r"Von Mises Effective Stress")
+
+    # 3. Shear stress vectors at element centroids
     axes[2].triplot(triang, color="lightgray", lw=0.4)
     axes[2].quiver(
         centroids[:, 0],
         centroids[:, 1],
         stresses[:, 0],
         stresses[:, 1],
-        color="crimson",
+        color="crimson"
     )
-    axes[2].set_title(r"Shear Stress Vectors $(\tau_{xz}, \tau_{yz})$")
-    axes[2].set_aspect("equal")
+    axes[2].set_title(r"Shear Stress Vectors")
 
     for ax in axes:
         ax.set_xlabel("x (m)")
         ax.set_ylabel("y (m)")
+        ax.set_aspect("equal")
 
     plt.tight_layout()
     plt.savefig("torsion_plots.png", dpi=300)
